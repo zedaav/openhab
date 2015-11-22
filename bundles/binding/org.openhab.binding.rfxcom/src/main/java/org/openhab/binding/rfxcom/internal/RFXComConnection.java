@@ -8,18 +8,15 @@
  */
 package org.openhab.binding.rfxcom.internal;
 
-import gnu.io.NoSuchPortException;
-import gnu.io.PortInUseException;
-import gnu.io.UnsupportedCommOperationException;
-
-import java.io.IOException;
 import java.util.Dictionary;
 import java.util.EventObject;
 
 import javax.xml.bind.DatatypeConverter;
 
+import org.openhab.binding.rfxcom.internal.connector.RFXComConnectorInterface;
 import org.openhab.binding.rfxcom.internal.connector.RFXComEventListener;
 import org.openhab.binding.rfxcom.internal.connector.RFXComSerialConnector;
+import org.openhab.binding.rfxcom.internal.connector.RFXComTcpConnector;
 import org.openhab.binding.rfxcom.internal.messages.RFXComMessageFactory;
 import org.openhab.binding.rfxcom.internal.messages.RFXComMessageInterface;
 import org.osgi.service.cm.ConfigurationException;
@@ -39,10 +36,11 @@ public class RFXComConnection implements ManagedService {
 	private static final Logger logger = LoggerFactory
 			.getLogger(RFXComConnection.class);
 
+	private static String host = null;
 	private static String serialPort = null;
 	private static byte[] setMode = null;
 
-	static RFXComSerialConnector connector = new RFXComSerialConnector();
+	static RFXComConnectorInterface connector = null;
 	private final MessageLister eventLister = new MessageLister();
 	
 	public void activate() {
@@ -64,7 +62,7 @@ public class RFXComConnection implements ManagedService {
 	 * 
 	 * @return instance to current RFXCOM client.
 	 */
-	public static synchronized RFXComSerialConnector getCommunicator() {
+	public static synchronized RFXComConnectorInterface getCommunicator() {
 		return connector;
 	}
 
@@ -75,7 +73,7 @@ public class RFXComConnection implements ManagedService {
 		logger.debug("Configuration updated, config {}", config != null ? true
 				: false);
 
-		if (serialPort != null) {
+		if (connector != null) {
 			logger.debug("Close previous connection");
 			connector.removeEventListener(eventLister);
 			connector.disconnect();
@@ -84,9 +82,10 @@ public class RFXComConnection implements ManagedService {
 		if (config != null) {
 
 			serialPort = (String) config.get("serialPort");
+			host = (String) config.get("host");
 			String setModeStr = (String) config.get("setMode");
 
-			if (setModeStr != null && setModeStr.isEmpty() == false) {
+			if (isValidParameter(setModeStr)) {
 				
 				try {
 					setMode = DatatypeConverter.parseHexBinary(setModeStr);
@@ -109,20 +108,36 @@ public class RFXComConnection implements ManagedService {
 
 	}
 
-	private void connect() throws NoSuchPortException, PortInUseException, UnsupportedCommOperationException, IOException, InterruptedException, ConfigurationException {
+	private boolean isValidParameter(String paramValue) {
+		return paramValue != null && paramValue.isEmpty() == false;
+	}
 
-		logger.info("Connecting to RFXCOM [serialPort='{}' ].",
-				new Object[] { serialPort });
+	private void connect() throws Exception {
+		
+		// Check mode (serial or TCP)
+		String connectParam = null;
+		if (isValidParameter(serialPort)) {
+			connector = new RFXComSerialConnector();
+			connectParam = serialPort;
+			logger.info("Connecting to RFXCOM [serialPort='{}' ].", new Object[] { serialPort });
+		} else if (isValidParameter(host)) {
+			connector = new RFXComTcpConnector();
+			connectParam = host;
+			logger.info("Connecting to RFXCOM [host='{}' ].", new Object[] { host });
+		}
 
 		connector.addEventListener(eventLister);
-		connector.connect(serialPort);
+		connector.connect(connectParam);
 
-		logger.debug("Reset controller");
-		connector.sendMessage(RFXComMessageFactory.CMD_RESET);
-		
-		// controller does not response immediately after reset,
-		// so wait a while
-		Thread.sleep(1000);
+		if (isValidParameter(serialPort)) {
+			// Reset only if mode is serial
+			logger.debug("Reset controller");
+			connector.sendMessage(RFXComMessageFactory.CMD_RESET);
+			
+			// controller does not response immediately after reset,
+			// so wait a while
+			Thread.sleep(1000);
+		}
 
 		if (setMode != null) {
 			try {

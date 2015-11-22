@@ -9,7 +9,18 @@
 package org.openhab.binding.rfxcom.internal.connector;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InterruptedIOException;
+import java.io.OutputStream;
+import java.net.Socket;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
+import javax.xml.bind.DatatypeConverter;
+
+import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,41 +32,172 @@ import org.slf4j.LoggerFactory;
  */
 public class RFXComTcpConnector implements RFXComConnectorInterface {
 
-	private static final Logger logger = LoggerFactory
-			.getLogger(RFXComTcpConnector.class);
+	private static final Logger logger = LoggerFactory.getLogger(RFXComTcpConnector.class);
 
-	RFXComTcpConnector() {
-		
+	private static final List<RFXComEventListener> _listeners = new CopyOnWriteArrayList<RFXComEventListener>();
+
+	InputStream in = null;
+	OutputStream out = null;
+	Socket socket = null;
+	Thread readerThread = null;
+
+	public RFXComTcpConnector() {
+
 	}
 
 	@Override
-	public void connect(String device) throws Exception {
+	public void connect(String host) throws Exception {
+		socket = new Socket(host, 10001);
+		in = socket.getInputStream();
+		out = socket.getOutputStream();
 
-		logger.error("connect not implemented");
+		out.flush();
+		if (in.markSupported()) {
+			in.reset();
+		}
+
+		// Run reader
+		readerThread = new SocketReader(in);
+		readerThread.start();
 	}
 
 	@Override
 	public void disconnect() {
-		logger.error("disconnect not implemented");
+		logger.debug("Disconnecting");
+
+		if (readerThread != null) {
+			logger.debug("Interrupt socket listener");
+			readerThread.interrupt();
+		}
+
+		if (out != null) {
+			logger.debug("Close socket out stream");
+			IOUtils.closeQuietly(out);
+		}
+		if (in != null) {
+			logger.debug("Close socket in stream");
+			IOUtils.closeQuietly(in);
+		}
+
+		if (socket != null) {
+			logger.debug("Close socket");
+			try {
+				socket.close();
+			} catch (IOException e) {
+				logger.debug("Exception while closing socket", e);
+			}
+		}
+
+		readerThread = null;
+		socket = null;
+		out = null;
+		in = null;
+
+		logger.debug("Closed");
 	}
-	
-	
+
 	@Override
 	public void sendMessage(byte[] data) throws IOException {
-
-		logger.error("sendPacket not implemented");
+		out.write(data);
+		out.flush();
 	}
 
-	@Override
-	public void addEventListener(RFXComEventListener listener) {
-
-		logger.error("addEventListener not implemented");
+	public void addEventListener(RFXComEventListener rfxComEventListener) {
+		_listeners.add(rfxComEventListener);
 	}
 
-	@Override
 	public void removeEventListener(RFXComEventListener listener) {
-
-		logger.error("removeEventListener not implemented");
+		_listeners.remove(listener);
 	}
 
+	public boolean isConnected() {
+		return out != null;
+	}
+
+	public class SocketReader extends Thread {
+		boolean interrupted = false;
+		InputStream in;
+
+		public SocketReader(InputStream in) {
+			this.in = in;
+		}
+
+		@Override
+		public void interrupt() {
+			interrupted = true;
+			super.interrupt();
+			try {
+				in.close();
+			} catch (IOException e) {
+			} // quietly close
+		}
+
+		public void run() {
+			final int dataBufferMaxLen = Byte.MAX_VALUE;
+
+			byte[] dataBuffer = new byte[dataBufferMaxLen];
+
+			int msgLen = 0;
+			boolean start_found = false;
+
+			logger.debug("Data listener started");
+
+			try {
+
+				byte[] tmpData = new byte[20];
+				int len = -1;
+
+				while ((len = in.read(tmpData)) > 0 && !interrupted) {
+
+					byte[] logData = Arrays.copyOf(tmpData, len);
+					logger.debug("Received data (len={}): {}", len, DatatypeConverter.printHexBinary(logData));
+
+					// Just one byte received? --> start of the frame
+					if (len == 1) {
+						// We're OK to go with the next read. Just record the
+						// byte.
+						start_found = true;
+						dataBuffer[1] = tmpData[0];
+						logger.debug("Start of frame detected");
+					} else if (start_found) {
+						// Remember the length
+						msgLen = len+2;
+						dataBuffer[0] = (byte) (len + 1);
+
+						// Copy the frame
+						System.arraycopy(tmpData, 0, dataBuffer, 2, len);
+
+						// whole message received, send an event
+						byte[] msg = new byte[msgLen + 1];
+
+						for (int j = 0; j < msgLen; j++)
+							msg[j] = dataBuffer[j];
+
+						RFXComMessageReceivedEvent event = new RFXComMessageReceivedEvent(this);
+
+						try {
+							Iterator<RFXComEventListener> iterator = _listeners.iterator();
+							while (iterator.hasNext()) {
+								iterator.next().packetReceived(event, msg);
+							}
+
+						} catch (Exception e) {
+							logger.error("Event listener invoking error", e);
+						}
+
+						// find new start
+						start_found = false;
+					} else {
+						// Garbage data, don't know what to do with it
+						logger.debug("Unknown data");
+					}
+				}
+			} catch (InterruptedIOException e) {
+				Thread.currentThread().interrupt();
+				logger.error("Interrupted via InterruptedIOException");
+			} catch (IOException e) {
+				logger.error("Reading from socket failed", e);
+			}
+		}
+	}
 }

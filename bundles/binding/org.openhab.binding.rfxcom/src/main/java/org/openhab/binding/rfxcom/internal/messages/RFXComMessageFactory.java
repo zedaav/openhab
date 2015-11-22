@@ -109,7 +109,7 @@ public class RFXComMessageFactory {
 	
 	public static RFXComMessageInterface getMessageInterface(byte[] packet) throws RFXComException {
 		
-		PacketType packetType = getPacketType(packet[1]);
+		PacketType packetType = getPacketType(packet);
 		
 		try {
 			String className = messageClasses.get(packetType);
@@ -137,13 +137,23 @@ public class RFXComMessageFactory {
 		throw new IllegalArgumentException("Unknown packet type " + packetType);
 	}
 
-	private static PacketType getPacketType(byte packetType) {
+	private static PacketType getPacketType(byte[] packet) {
+		byte packetType = packet[1];
 		for (PacketType p : PacketType.values()) {
 			if (p.toByte() == packetType) {
-				return p;
+				return postProcess(p, packet);
 			}
 		}
 		
 		return PacketType.UNKNOWN;
+	}
+
+	private static PacketType postProcess(PacketType p, byte[] packet) {
+		// Handle some special cases...
+		if ((p == PacketType.TEMPERATURE) && (packet.length >= 10)) {
+			// Looks like a temperature + humidity packet
+			return PacketType.TEMPERATURE_HUMIDITY;
+		}
+		return p;
 	}
 }

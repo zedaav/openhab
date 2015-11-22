@@ -59,4 +59,8 @@ public interface RFXComConnectorInterface {
 	 */
 	public void removeEventListener(RFXComEventListener listener);
 
+	/**
+	 * Checks if connection to the RFXCOM controller is active
+	 */
+	public boolean isConnected();
 }

@@ -22,6 +22,8 @@ import org.openhab.core.library.types.StringType;
 import org.openhab.core.types.State;
 import org.openhab.core.types.Type;
 import org.openhab.core.types.UnDefType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * RFXCOM data class for temperature and humidity message.
@@ -43,6 +45,7 @@ public class RFXComTemperatureHumidityMessage extends RFXComBaseMessage {
 		WT260_WT260H_WT440H_WT450_WT450H(8),
 		VIKING_02035_02038(9),
 		RUBICSON(10),
+		THGR228N(26),
 
 		UNKNOWN(255);
 
@@ -127,21 +130,45 @@ public class RFXComTemperatureHumidityMessage extends RFXComBaseMessage {
 	@Override
 	public void encodeMessage(byte[] data) {
 
+		/*
+		 * 501A2D404594140007366C   TH1[17668] THGN122N,THGR122NX,THGR228N,THGR268 CH 3 addr:45 temp:14,9°C | 58,82°F hum:70 Normal  battery empty bits=80
+		 * 50: length in bits
+		 * 1A2D: probe type
+		 * 4045: probe address / to be similar to ZiBase ID, probe ID would be 0x1A2D4504   (Channel on last quartet; 1->1, 2->2, 4->3; e.g. here channel is 3)
+		 * 9414: Temp on 0xX0YZ --> YZ.X (here 14.9°C) / on 0x0X00, bit 4 is for low battery (here, we're in low battery state)
+		 * 0007: Humidity on 0xX00Y --> YX (here 70%)
+		 * 36: checksum of the nibbles of the 8 first bytes (excluding length), - 10  (here: 1+A+2+D+4+0+4+5+9+4+1+4+0+0+0+7 - A)
+		 * 
+		 * Decoding inspired from https://github.com/beanz/device-rfxcom-perl/blob/build/master/lib/Device/RFXCOM/Decoder/Oregon.pm
+		 */
+		
 		super.encodeMessage(data);
 
-		try {
-			subType = SubType.values()[super.subType];
-		} catch (Exception e) {
-			subType = SubType.UNKNOWN;
+		subType = SubType.UNKNOWN;
+		for (SubType candidate : SubType.values()) {
+			if (candidate.toByte() == super.subType) {
+				subType = candidate;
+			}
 		}
-		sensorId = (data[4] & 0xFF) << 8 | (data[5] & 0xFF);
 
-		temperature = (short) ((data[6] & 0x7F) << 8 | (data[7] & 0xFF)) * 0.1;
-		if ((data[6] & 0x80) != 0)
-			temperature = -temperature;
-
-		humidity = data[8];
-
+		// Specific processing for THGR228N
+		if (subType == SubType.THGR228N) {
+			// 4 bytes identifier (as it is identified on ZiBase)
+			sensorId = (((int)data[2]) << 24) | (((int)data[3]) << 16) | (((int)data[5]) << 8) | ((((int)data[4]) & 0x0F) << 4) | ((((int)data[4]) & 0xF0) >> 4);
+			
+			// Temperature on 12 bits
+			temperature = ((data[7] & 0xF0) >> 4)*10 + (data[7] & 0x0F) + ((data[6] & 0xF0) >> 4)*0.1;
+			
+			// Humidity split on 2 bytes
+			humidity = (byte) ((data[9] & 0x0F) * 10 + ((data[8] & 0xF0) >> 4));
+		} else {
+			sensorId = (data[4] & 0xFF) << 8 | (data[5] & 0xFF);
+			temperature = (short) ((data[6] & 0x7F) << 8 | (data[7] & 0xFF)) * 0.1;
+			if ((data[6] & 0x80) != 0)
+				temperature = -temperature;
+			humidity = data[8];
+		}
+		
 		try {
 			humidityStatus = HumidityStatus.values()[data[9]];
 		} catch (Exception e) {
