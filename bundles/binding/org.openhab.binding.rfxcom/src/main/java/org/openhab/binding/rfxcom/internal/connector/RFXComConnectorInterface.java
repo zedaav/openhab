@@ -49,6 +49,7 @@ public interface RFXComConnectorInterface {
      */
     public void addEventListener(RFXComEventListener listener);
 
+<<<<<<< Upstream, based on v1.8.3
     /**
      * Procedure for remove event listener.
      * 
@@ -61,4 +62,18 @@ public interface RFXComConnectorInterface {
      * Ignore any data in the receive buffer
      */
     public void clearReceiveBuffer();
+=======
+	/**
+	 * Procedure for remove event listener.
+	 * 
+	 * @param listener
+	 *            Event listener instance to remove.
+	 */
+	public void removeEventListener(RFXComEventListener listener);
+
+	/**
+	 * Checks if connection to the RFXCOM controller is active
+	 */
+	public boolean isConnected();
+>>>>>>> 8fc494d Add support for RFXCom TCP connector
 }

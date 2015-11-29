@@ -20,8 +20,8 @@ import javax.xml.bind.DatatypeConverter;
 
 import org.openhab.binding.rfxcom.RFXComBindingProvider;
 import org.openhab.binding.rfxcom.RFXComValueSelector;
+import org.openhab.binding.rfxcom.internal.connector.RFXComConnectorInterface;
 import org.openhab.binding.rfxcom.internal.connector.RFXComEventListener;
-import org.openhab.binding.rfxcom.internal.connector.RFXComSerialConnector;
 import org.openhab.binding.rfxcom.internal.messages.RFXComBaseMessage.PacketType;
 import org.openhab.binding.rfxcom.internal.messages.RFXComMessageFactory;
 import org.openhab.binding.rfxcom.internal.messages.RFXComMessageInterface;
@@ -61,7 +61,7 @@ public class RFXComBinding extends AbstractBinding<RFXComBindingProvider> {
 
 	public void activate() {
 		logger.debug("Activate");
-		RFXComSerialConnector connector = RFXComConnection.getCommunicator();
+		RFXComConnectorInterface connector = RFXComConnection.getCommunicator();
 		if (connector != null) {
 			connector.addEventListener(eventLister);
 		}
@@ -69,7 +69,7 @@ public class RFXComBinding extends AbstractBinding<RFXComBindingProvider> {
 
 	public void deactivate() {
 		logger.debug("Deactivate");
-		RFXComSerialConnector connector = RFXComConnection.getCommunicator();
+		RFXComConnectorInterface connector = RFXComConnection.getCommunicator();
 		if (connector != null) {
 			connector.removeEventListener(eventLister);
 		}
@@ -152,8 +152,7 @@ public class RFXComBinding extends AbstractBinding<RFXComBindingProvider> {
 					"Received command (item='{}', state='{}', class='{}')",
 					new Object[] { itemName, command.toString(),
 							command.getClass().toString() });
-			RFXComSerialConnector connector = RFXComConnection
-					.getCommunicator();
+			RFXComConnectorInterface connector = RFXComConnection.getCommunicator();
 
 			if (connector == null) {
 				logger.warn("RFXCom controller is not initialized!");
@@ -178,7 +177,7 @@ public class RFXComBinding extends AbstractBinding<RFXComBindingProvider> {
 
 	private boolean executeCommand0(String itemName, Type command,
 			final RFXComBindingProvider provider,
-			RFXComSerialConnector connector) {
+			RFXComConnectorInterface connector) {
 		String id = provider.getId(itemName);
 		PacketType packetType = provider.getPacketType(itemName);
 		Object subType = provider.getSubType(itemName);
