@@ -109,7 +109,7 @@ public class RFXComMessageFactory {
 	
 	public static RFXComMessageInterface getMessageInterface(byte[] packet) throws RFXComException {
 		
-		PacketType packetType = getPacketType(packet[1]);
+		PacketType packetType = getPacketType(packet);
 		
 		try {
 			String className = messageClasses.get(packetType);
@@ -137,13 +137,27 @@ public class RFXComMessageFactory {
 		throw new IllegalArgumentException("Unknown packet type " + packetType);
 	}
 
-	private static PacketType getPacketType(byte packetType) {
+	private static PacketType getPacketType(byte[] packet) {
+		byte packetType = packet[1];
 		for (PacketType p : PacketType.values()) {
 			if (p.toByte() == packetType) {
-				return p;
+				return postProcess(p, packet);
 			}
 		}
 		
 		return PacketType.UNKNOWN;
+	}
+
+	private static PacketType postProcess(PacketType p, byte[] packet) {
+		// Handle some special cases...
+		if ((packet[1] == 0x1A) && (packet[2] == 0x2D)) {
+			// Looks like a temperature + humidity packet (cf https://github.com/beanz/device-rfxcom-perl/blob/build/master/lib/Device/RFXCOM/Decoder/Oregon.pm)
+			return PacketType.TEMPERATURE_HUMIDITY;
+		}
+		if ((packet[1] == 0xEA) && (packet[2] == 0x4C)) {
+			// Looks like a temperature packet (cf https://github.com/beanz/device-rfxcom-perl/blob/build/master/lib/Device/RFXCOM/Decoder/Oregon.pm)
+			return PacketType.TEMPERATURE;
+		}
+		return p;
 	}
 }
